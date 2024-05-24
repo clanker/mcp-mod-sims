@@ -454,7 +454,7 @@ server <- function(input, output, session) {
     }
 
     p1 +
-      scale_x_continuous(limits = c(220, 270)) +
+      #scale_x_continuous(limits = c(220, 270)) +
       theme_bw(base_size = 24) +
       theme(legend.position = "right") +
       guides(x = guide_axis(angle = 0)) +
