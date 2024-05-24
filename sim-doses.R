@@ -122,6 +122,10 @@ col_max2 <- res_sim |>
 res_sim$lowest <- factor(names(res_sim)[1:7],
                          levels = names(res_sim)[1:7])[col_max2]
 
+# cap all dose estimates at 1000 mg
+res_sim <- res_sim |>
+  dplyr::mutate(dose_aic = pmin(dose_aic, 1000),
+                dose_best = pmin(dose_best, 1000))
 
 # Perform a bootstrap analysis for calculated TD
 dat <- res_par |>
@@ -150,7 +154,7 @@ for (i in 1:nrow(dat_summary)) {
     id_list <- sample(1:nrow(dat_sub), replace = TRUE)
 
     rmse_aic[j] <- sqrt(mean((dat_sub$dose_aic[id_list] - 400)^2, na.rm = TRUE))
-    rmse_best[j] <- sqrt(mean((dat_sub$dose_aic[id_list] - 400)^2, na.rm = TRUE))
+    rmse_best[j] <- sqrt(mean((dat_sub$dose_best[id_list] - 400)^2, na.rm = TRUE))
   }
     dat_summary$dose_aic[i] = tibble(rmse = rmse_aic)
     dat_summary$dose_best[i] = tibble(rmse = rmse_best)
@@ -163,21 +167,122 @@ res_rmse <- dat_summary |>
   dplyr::select(-nn) |>
   unnest(c(dose_aic, dose_best))
 
-save(res_rmse, res_par, res_sim, res_aic, file = "sim-doses.Rdata")
+save(res_rmse, res_par, res_sim, res_aic, file = "sim-doses-2.Rdata")
 
 
 ## Analyze the results
 
-# I envision a 3 panel plot (1 row) with 6 horizontal boxplots
+# I envision a 4 panel plot (1 row) with 6 horizontal boxplots
 #   for the scenarios, the panels being:
 #   (1) method failure
 #   (2) estimated TD (aic-weighting)
 #   (3) estimated TD (best model)
+load("sim-doses-2.Rdata")
 
 # 1. Compare MCP-MOD failure across the scenarios
 # Panel (1)
 
+res_par |>
+  dplyr::mutate("n" = forcats::as_factor(n)) |>
+  dplyr::rename("type" = symmetric) |>
+  dplyr::mutate("n" = forcats::fct_recode(n, "n: 120" = "120", "n: 360" = "360"),
+                "type" = forcats::fct_relevel(type, c("asymmetric", "symmetric", "reduced"))) |>
+  ggplot(aes(x = type, fill = best)) +
+  geom_bar() +
+  facet_grid(rows = vars(n)) +
+  theme_bw(base_size = 18) +
+  theme(legend.position = "top") +
+  labs(title = "Best Model Proportion",
+       y = "Count", x = "Scenario", fill = "") +
+  coord_flip()
+
+ggsave(filename = "hist-model.pdf", width = 8, height = 5)
 
 
-# 2. Compare boxplots for TD:aic and TD:best across the scenarios
-# Panels (2) and (3)
+res_par |>
+  dplyr::select(n, symmetric) |>
+  dplyr::bind_cols(res_sim |>
+                     dplyr::select(dose_aic, dose_best)) |>
+  tidyr::unite("scenario", c(symmetric, n), sep = ":", remove = FALSE) |>
+  dplyr::mutate("scenario" = forcats::as_factor(scenario)) |>
+  dplyr::mutate("n" = forcats::as_factor(n)) |>
+  dplyr::rename("type" = symmetric) |>
+  tidyr::pivot_longer(dose_aic:dose_best, names_to = "criterion", values_to = "rmse") |>
+  dplyr::mutate("criterion" = forcats::as_factor(criterion),
+                "criterion" = forcats::fct_recode(criterion,
+                                                  "Best Fit" = "dose_best",
+                                                  "Ensemble" = "dose_aic"),
+                "n" = forcats::fct_recode(n, "n: 120" = "120", "n: 360" = "360"),
+                "type" = forcats::fct_relevel(type, c("asymmetric", "symmetric", "reduced"))) |>
+  ggplot(aes(y = rmse, x = type, fill = type)) +
+  geom_boxplot() +
+  geom_hline(aes(yintercept = 400), color = 'navy', lty = 2, lwd = 1/2) +
+  coord_flip() +
+  facet_grid(rows = vars(criterion), cols = vars(n), scales = "free_x") +
+  theme_bw(base_size = 18) +
+  theme(legend.position = "none") +
+  labs(title = "Boxplots for Target Dose Estimates",
+       y = "Target Dose (mg)", x = "Scenario")
+
+ggsave(filename = "boxplot-td.pdf", width = 8, height = 5)
+
+
+res_par |>
+  dplyr::select(n, symmetric) |>
+  dplyr::bind_cols(res_sim |>
+                     dplyr::select(dose_aic, dose_best)) |>
+  tidyr::unite("scenario", c(symmetric, n), sep = ":", remove = FALSE) |>
+  dplyr::mutate("scenario" = forcats::as_factor(scenario)) |>
+  dplyr::mutate("n" = forcats::as_factor(n)) |>
+  dplyr::rename("type" = symmetric) |>
+  tidyr::pivot_longer(dose_aic:dose_best, names_to = "criterion", values_to = "rmse") |>
+  dplyr::mutate("rmse" = abs(400 - rmse)) |>
+  dplyr::mutate("criterion" = forcats::as_factor(criterion),
+                "criterion" = forcats::fct_recode(criterion,
+                                                  "Best Fit" = "dose_best",
+                                                  "Ensemble" = "dose_aic"),
+                "n" = forcats::fct_recode(n, "n: 120" = "120", "n: 360" = "360"),
+                "type" = forcats::fct_relevel(type, c("asymmetric", "symmetric", "reduced"))) |>
+  ggplot(aes(y = rmse, x = type, fill = type)) +
+  geom_boxplot() +
+  coord_flip() +
+  facet_grid(rows = vars(criterion), cols = vars(n), scales = "free_x") +
+  theme_bw(base_size = 18) +
+  theme(legend.position = "none") +
+  labs(title = "Boxplots for Target Dose Error",
+       y = "Absolute Error (mg)", x = "Scenario")
+
+ggsave(filename = "boxplot-abserr.pdf", width = 8, height = 5)
+
+
+
+# 3. Compare boxplots for TD:aic and TD:best across the scenarios
+# Panels (3) and (4)
+
+res_rmse |>
+  dplyr::ungroup() |>
+  tidyr::unite("scenario", c(symmetric, n), sep = ":", remove = FALSE) |>
+  dplyr::select(-K) |>
+  dplyr::mutate("scenario" = forcats::as_factor(scenario)) |>
+  dplyr::mutate("n" = forcats::as_factor(n)) |>
+  dplyr::rename("type" = symmetric) |>
+  tidyr::pivot_longer(dose_aic:dose_best, names_to = "criterion", values_to = "rmse") |>
+  dplyr::mutate("criterion" = forcats::as_factor(criterion),
+                "criterion" = forcats::fct_recode(criterion,
+                                                  "Best Fit" = "dose_best",
+                                                  "Ensemble" = "dose_aic"),
+                "n" = forcats::fct_recode(n, "n: 120" = "120", "n: 360" = "360"),
+                "type" = forcats::fct_relevel(type, c("asymmetric", "symmetric", "reduced"))) |>
+  ggplot(aes(y = rmse, x = type, fill = type)) +
+  geom_boxplot() +
+  coord_flip() +
+  facet_grid(rows = vars(criterion), cols = vars(n), scales = "free_x") +
+  theme_bw(base_size = 18) +
+  theme(legend.position = "none") +
+  labs(title = "Boxplots for Bootstrap Estimates",
+       y = "RMSE", x = "Scenario")
+
+ggsave(filename = "bootstrap-rmse.pdf", width = 8, height = 5)
+
+
+
